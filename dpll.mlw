@@ -69,19 +69,17 @@ predicate ok_cls (mm: assignment) (na: int) (c: cls) =
    assignment `mm` cannot possibly be extended to a model. *)
 
 let is_lit_sat (mm : assignment) (na : int) (l : lit) : (assgnd: bool, sat : bool)
-= if abs l < na then
-  (
-    if mm[abs l] < 0 then (true, true)
-    else (true, false)
-  )
-  else (false, false)
+= if abs l < na then  (* check that the variable was assigned *)
+  (true, mm[abs l] <> l) (* assigned and satisfied condition *)
+  else (false, false) (* not assigned *)
 
 let is_clause_satisfied (mm : assignment) (na: int) (cl : cls) : (unsat : bool, sat: bool)
 = let (l1, l2, l3) = cl in
   let (a1, s1) = is_lit_sat mm na l1 in
   let (a2, s2) = is_lit_sat mm na l2 in
   let (a3, s3) = is_lit_sat mm na l3 in
-  ( a1 && a2 && a3 && not s1 && not s2 && not s3, s1 || s2 || s3)
+  let truth_value = s1 || s2 || s3 in (* value of the clause *)
+  ( a1 && a2 && a3 && not truth_value, truth_value )  (* fst : all var are assigned and the clause is not satisfied, snd : clause is sat *)
 
 let scan (mm: assignment) (cl: array cls) (nv na nc: int) : (b: bool, mc: int)
 = let ref i = 0 in
@@ -98,7 +96,7 @@ let scan (mm: assignment) (cl: array cls) (nv na nc: int) : (b: bool, mc: int)
       swap cl i mc
     end
   done;
-  unsat_cls_fnd, mc
+  not unsat_cls_fnd, mc
       
 
 (* Function `dpll` checks the current state of the search using `scan`,
@@ -112,7 +110,7 @@ let rec dpll (mm: assignment) (cl: array cls) (nv na nc: int) : (s: bool)
 = match scan mm cl nv na nc with
   | False, _ -> false
   | True, mc -> 
-    if mc = 0 then true 
+    if mc = 0 then true (* on risque de devoir donner ne valeur par defaut a chaque lit non assigné pour assurer que mm soient bien un assignment valide *)
     else (
       mm[na] <- -na;
       if dpll mm cl nv (na + 1) mc then true

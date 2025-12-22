@@ -1,2 +1,8 @@
 *.gz
 *.xml
+*.bak
+
+_build/
+*.native
+dpll.ml
+

@@ -59,17 +59,47 @@ predicate ok_cls (mm: assignment) (na: int) (c: cls) =
   let l1, l2, l3 = c in
   ok_lit mm na l1 \/ ok_lit mm na l2 \/ ok_lit mm na l3
 
-(* Function `scan` moves the clases which are true in
+(* Function `scan` moves the clauses which are true in
    assignment `mm` outside of the active zone `cl[0..nc)`,
-   and returns the new number of active clases `mc` which
+   and returns the new number of active clauses `mc` which
    has to be smaller or equal than `nc`. It also returns
    a boolean flag `b` which is set to `false`, when a false
    clause is discovered (i.e., all three literals have been
    assigned a false truth value), and therefore the current
    assignment `mm` cannot possibly be extended to a model. *)
 
+let is_lit_sat (mm : assignment) (na : int) (l : lit) : (assgnd: bool, sat : bool)
+= if abs l < na then
+  (
+    if mm[abs l] < 0 then (true, true)
+    else (true, false)
+  )
+  else (false, false)
+
+let is_clause_satisfied (mm : assignment) (na: int) (cl : cls) : (unsat : bool, sat: bool)
+= let (l1, l2, l3) = cl in
+  let (a1, s1) = is_lit_sat mm na l1 in
+  let (a2, s2) = is_lit_sat mm na l2 in
+  let (a3, s3) = is_lit_sat mm na l3 in
+  ( a1 && a2 && a3 && not s1 && not s2 && not s3, s1 || s2 || s3)
+
 let scan (mm: assignment) (cl: array cls) (nv na nc: int) : (b: bool, mc: int)
-= absurd
+= let ref i = 0 in
+  let ref mc = nc in
+  let ref unsat_cls_fnd = false in
+  while not unsat_cls_fnd && i < mc do 
+    match is_clause_satisfied mm na cl[i] with
+    | True , _ -> 
+      unsat_cls_fnd <- true
+    | False, False ->
+      i <- i + 1
+    | False, True ->
+      mc <- mc - 1;
+      swap cl i mc
+    end
+  done;
+  unsat_cls_fnd, mc
+      
 
 (* Function `dpll` checks the current state of the search using `scan`,
    and after that, if the search can be continued, extends the current
@@ -79,7 +109,20 @@ let scan (mm: assignment) (cl: array cls) (nv na nc: int) : (b: bool, mc: int)
    if `mm` cannot possibly be extended to a model. *)
 
 let rec dpll (mm: assignment) (cl: array cls) (nv na nc: int) : (s: bool)
-= absurd
+= match scan mm cl nv na nc with
+  | False, _ -> false
+  | True, mc -> 
+    if mc = 0 then true 
+    else (
+      mm[na] <- -na;
+      if dpll mm cl nv (na + 1) mc then true
+      else ( 
+        mm[na] <- na;
+        dpll mm cl nv (na + 1) mc
+      )
+    )
+  end
+  
 
 (* Function `sat` implements a simple 3SAT solver. If it returns `true`,
    assignment `mm` contains a model of the clause set `cl`. If it returns

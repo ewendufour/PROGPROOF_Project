@@ -68,27 +68,54 @@ predicate ok_cls (mm: assignment) (na: int) (c: cls) =
    assigned a false truth value), and therefore the current
    assignment `mm` cannot possibly be extended to a model. *)
 
-let is_lit_sat (mm : assignment) (na : int) (l : lit) : (assgnd: bool, sat : bool)
+predicate sat_lit (mm: assignment) (na : int) (l : lit) = 
+  abs l < na /\ mm[abs l] <> l 
+
+let is_lit_sat (mm : assignment) (nv na : int) (l : lit) : (assgnd: bool, sat : bool)
+  requires { is_assignment mm na }
+  requires { is_lit nv l }
+  ensures  { assgnd <-> abs l < na }
+  ensures  { sat <-> ok_lit mm na l }
 = if abs l < na then  (* check that the variable was assigned *)
   (true, mm[abs l] <> l) (* assigned and satisfied condition *)
   else (false, false) (* not assigned *)
+  
+predicate unsat_cls (mm : assignment) (na : int) (c : cls) =
+  let l1, l2, l3 = c in
+  abs l1 < na /\ mm[abs l1] = l1 /\ 
+  abs l2 < na /\ mm[abs l2] = l2 /\ 
+  abs l3 < na /\ mm[abs l3] = l3 
 
-let is_clause_satisfied (mm : assignment) (na: int) (cl : cls) : (unsat : bool, sat: bool)
+let is_clause_satisfied (mm : assignment) (nv na: int) (cl : cls) : (unsat : bool, sat: bool)
+  requires { is_cls nv cl }
+  requires { is_assignment mm na }
+  ensures  { sat <-> ok_cls mm na cl }
+  ensures  { unsat <-> unsat_cls mm na cl }
 = let (l1, l2, l3) = cl in
-  let (a1, s1) = is_lit_sat mm na l1 in
-  let (a2, s2) = is_lit_sat mm na l2 in
-  let (a3, s3) = is_lit_sat mm na l3 in
+  let (a1, s1) = is_lit_sat mm nv na l1 in
+  let (a2, s2) = is_lit_sat mm nv na l2 in
+  let (a3, s3) = is_lit_sat mm nv na l3 in
   let truth_value = s1 || s2 || s3 in (* value of the clause *)
   ( a1 && a2 && a3 && not truth_value, truth_value )  (* fst : all var are assigned and the clause is not satisfied, snd : clause is sat *)
 
 let scan (mm: assignment) (cl: array cls) (nv na nc: int) : (b: bool, mc: int)
+  requires { is_assignment mm na }
+  requires { forall i. 0 <= i < length cl -> is_cls (length mm) cl[i] }
+  requires { 0 <= nc <= cl.length }
+  requires { nv = mm.length }
+  requires { forall i. nc <= i < cl.length -> ok_cls mm na cl[i] } 
+  ensures { permut_all (old cl) cl}
+  ensures { forall i. mc <= i < cl.length -> ok_cls mm na cl[i] }
 = let ref i = 0 in
   let ref mc = nc in
-  let ref unsat_cls_fnd = false in
-  while not unsat_cls_fnd && i < mc do 
-    match is_clause_satisfied mm na cl[i] with
+  while i < mc do 
+    variant { mc - i }
+    invariant { forall i. mc <= i < cl.length -> ok_cls mm na cl[i] }
+    invariant { permut_all (old cl) cl } 
+    invariant { 0 <= i <= mc <= cl.length }
+    match is_clause_satisfied mm nv na cl[i] with
     | True , _ -> 
-      unsat_cls_fnd <- true
+      return false, mc
     | False, False ->
       i <- i + 1
     | False, True ->
@@ -96,7 +123,7 @@ let scan (mm: assignment) (cl: array cls) (nv na nc: int) : (b: bool, mc: int)
       swap cl i mc
     end
   done;
-  not unsat_cls_fnd, mc
+  true , mc
       
 
 (* Function `dpll` checks the current state of the search using `scan`,

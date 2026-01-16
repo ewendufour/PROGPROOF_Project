@@ -68,9 +68,6 @@ predicate ok_cls (mm: assignment) (na: int) (c: cls) =
    assigned a false truth value), and therefore the current
    assignment `mm` cannot possibly be extended to a model. *)
 
-predicate sat_lit (mm: assignment) (na : int) (l : lit) = 
-  abs l < na /\ mm[abs l] <> l 
-
 let is_lit_sat (mm : assignment) (nv na : int) (l : lit) : (assgnd: bool, sat : bool)
   requires { is_assignment mm na }
   requires { is_lit nv l }
@@ -80,17 +77,17 @@ let is_lit_sat (mm : assignment) (nv na : int) (l : lit) : (assgnd: bool, sat : 
   (true, mm[abs l] <> l) (* assigned and satisfied condition *)
   else (false, false) (* not assigned *)
   
-predicate unsat_cls (mm : assignment) (na : int) (c : cls) =
+(* predicate unsat_cls (mm : assignment) (na : int) (c : cls) =
   let l1, l2, l3 = c in
   abs l1 < na /\ mm[abs l1] = l1 /\ 
   abs l2 < na /\ mm[abs l2] = l2 /\ 
-  abs l3 < na /\ mm[abs l3] = l3 
+  abs l3 < na /\ mm[abs l3] = l3*) 
 
 let is_clause_satisfied (mm : assignment) (nv na: int) (cl : cls) : (unsat : bool, sat: bool)
   requires { is_cls nv cl }
   requires { is_assignment mm na }
   ensures  { sat <-> ok_cls mm na cl }
-  ensures  { unsat <-> unsat_cls mm na cl }
+  ensures  { unsat -> not (ok_cls mm na cl) }
 = let (l1, l2, l3) = cl in
   let (a1, s1) = is_lit_sat mm nv na l1 in
   let (a2, s2) = is_lit_sat mm nv na l2 in
@@ -106,13 +103,18 @@ let scan (mm: assignment) (cl: array cls) (nv na nc: int) : (b: bool, mc: int)
   requires { forall i. nc <= i < cl.length -> ok_cls mm na cl[i] } 
   ensures { permut_all (old cl) cl}
   ensures { forall i. mc <= i < cl.length -> ok_cls mm na cl[i] }
+  ensures { forall i. nc <= i < cl.length -> cl[i] = old (cl[i]) } 
+  ensures { 0 <= mc <= nc }
+  ensures { not b -> exists i. 0 <= i < mc /\ (not ok_cls mm na cl[i]) }      
 = let ref i = 0 in
   let ref mc = nc in
   while i < mc do 
     variant { mc - i }
     invariant { forall i. mc <= i < cl.length -> ok_cls mm na cl[i] }
     invariant { permut_all (old cl) cl } 
-    invariant { 0 <= i <= mc <= cl.length }
+    invariant { forall i. nc <= i < cl.length -> cl[i] = old (cl[i]) } 
+    invariant { 0 <= i <= mc <= nc <= cl.length }
+    invariant {forall j. 0 <= j < i -> not (ok_cls mm na cl[j]) }
     match is_clause_satisfied mm nv na cl[i] with
     | True , _ -> 
       return false, mc
@@ -134,16 +136,48 @@ let scan (mm: assignment) (cl: array cls) (nv na nc: int) : (b: bool, mc: int)
    if `mm` cannot possibly be extended to a model. *)
 
 let rec dpll (mm: assignment) (cl: array cls) (nv na nc: int) : (s: bool)
+  requires { 0 < na <= nv }
+  requires { is_assignment mm na }
+  requires { nv = mm.length }
+  requires { forall i. 0 <= i < length cl -> is_cls (length mm) cl[i] }
+  requires { 0 <= nc <= cl.length } 
+  requires { forall i. nc <= i < cl.length -> ok_cls mm na cl[i] }
+   
+  ensures { forall i. 0 <= i < na -> mm[i] = (old mm[i])}  
+  ensures { forall i. nc <= i < cl.length -> cl[i] = old (cl[i]) } 
+  ensures { permut_all (old cl) cl }
+  ensures { s -> forall i. 0 <= i < length cl -> ok_cls mm (length mm) cl[i] }
+  ensures { s -> is_assignment mm (mm.length) }
+  ensures { not s -> forall mc. 
+            ((forall i. 0 <= i < na -> mc[i] = mm[i]) /\
+            is_assignment mc (mm.length)) ->
+            exists i. 0 <= i < length cl /\ not ok_cls mc (length mm) cl[i]}
+  variant { nv - na }
 = match scan mm cl nv na nc with
   | False, _ -> false
   | True, mc -> 
-    if mc = 0 then true (* on risque de devoir donner ne valeur par defaut a chaque lit non assigné pour assurer que mm soient bien un assignment valide *)
+    if mc = 0 then (
+      let ref i =  na in
+      while i < nv do
+      variant {nv - i}
+      invariant { forall j. 0 <= j < length cl -> ok_cls mm i cl[j] }
+      invariant { is_assignment mm i }
+      invariant { na <= i <= nv }
+      invariant { forall j. 0 <= j < na -> mm[j] = (old mm[j]) }
+        mm[i] <- -i;
+        i <- i+1;
+      done;
+      true 
+    )
     else (
-      mm[na] <- -na;
-      if dpll mm cl nv (na + 1) mc then true
-      else ( 
-        mm[na] <- na;
-        dpll mm cl nv (na + 1) mc
+      if na = nv then false
+      else (
+        mm[na] <- -na;
+        if dpll mm cl nv (na + 1) mc then true
+        else ( 
+          mm[na] <- na;
+          dpll mm cl nv (na + 1) mc
+        )
       )
     )
   end

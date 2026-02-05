@@ -1,0 +1,468 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage{fullpage}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel} \frenchbsetup{og=«,fg=»}
+\usepackage{xcolor}
+\usepackage{syntax}
+\usepackage{listings}
+\usepackage{langs}
+\usepackage{multicol}
+
+
+\definecolor{blue2}{rgb}{0.7, 0.83, 1}
+\definecolor{orange}{rgb}{1, 0.83, 0.7}
+\definecolor{grey}{RGB}{200,200,200}
+\definecolor{link_color}{RGB}{0,0,200}
+
+\usepackage[bookmarks=true,colorlinks=true,
+    citecolor={link_color}, filecolor={link_color},
+    urlcolor={link_color}, linkcolor={link_color},
+    pdfstartview={XYZ null null 1.22}, hyperindex=true]{hyperref}
+
+
+\title{Rapport de projet de Preuves de Programmes}
+\author{Ewen DUFOUR}
+
+\begin{document}
+
+\maketitle{}
+
+\begin{abstract}
+  Dans ce projet, nous proposons une implémentation de l'algorithme DPLL. 
+  Nous donnons une spécification et montrons que notre implémentation respecte cette spécification à l'aide de l'outil de vérification déductive Why3.
+\end{abstract}
+
+\section{Introduction}
+\subsection{Problème étudié}
+Nous étudions le problème de la satisfiabilité booléenne.
+Ici, nous nous intéressons en particulier au problème 3-SAT. 
+Ce problème prend en entrée une liste de clauses, chacune composée de trois littéraux séparés par des opérateurs $\vee$.
+Un littéral est une variable, possiblement précédée par un opérateur $\neg$. 
+Nous cherchons une assignation de valeur booléenne pour chaque variable qui rend toutes les clauses vraie.  
+L'algorithme DPLL permet de résoudre ce problème. 
+
+\subsection{Algorithme DPLL}
+
+DPLL prend une assignation et une liste de clause à satisfaire.
+L'algorithme commence par scanner la liste de clauses afin de :
+\begin{itemize}
+  \item vérifier si une clause est déja fausse dans l'assignation fournie, auquel cas DPLL renvoie directement unsat;
+  \item séparer les clauses satisfaites, des clauses à satisfaire
+\end{itemize}
+Si aucune clause fausse n'est trouvée, DPLL prend la prochaine variable non assignée et lui assigne une valeur (disons vrai). 
+Il s'appelle récursivement pour tester la satisfiabilité avec la nouvelle assignation.
+Si l'appel récursif renvoi unsat, alors l'algorithme assigne à la variable la valeur opposée (ici, faux), et s'appelle de nouveau récurssivement.
+Dans le cas ou l'appel récursif renvoi de nouveau unsat, DPLL renvoi unsat.
+Si toutes les clauses sont satisfaites, DPLL renvoi sat.
+
+\subsection{Description du projet}
+On nous donne une fonction principale \textit{sat} appelant la fonction \textit{dpll} ainsi qu'une spécification que \textit{sat} doit respecter.
+
+\begin{lstlisting}[language=whyml]  
+let sat (mm: assignment) (cl: array cls) : (sat: bool)
+  requires { 0 < length mm }
+  requires { forall i. 0 <= i < length cl -> is_cls (length mm) cl[i] }
+  ensures  { sat -> is_assignment mm (length mm) }
+  ensures  { sat -> forall i. 0 <= i < length cl -> ok_cls mm (length mm) cl[i] }
+  ensures  { not sat -> forall mc. is_assignment mc (length mm) ->
+    exists i. 0 <= i < length cl /\ not ok_cls mc (length mm) cl[i] }
+  ensures  { permut_all (old cl) cl }
+= mm[0] <- 0;
+  dpll mm cl (length mm) 1 (length cl)
+\end{lstlisting}
+
+Le contrat de cette fonction indique deux choses.
+Premièrement, la fonction attend une entrée valide.
+C'est-à-dire une liste de clauses bien formées (stockée dans $cl$) ainsi qu'un tableau pouvant accueillir l'assignation de valeur de chaque variable ($mm$). 
+Deuxièmement, la fonction nous assure trois propriétés sur le résultat et la liste de clauses :
+\begin{enumerate}
+  \item (Soundness) si la fonction renvoie sat, elle fourni dans $mm$ une assignation valide de chaque littéral rendant toutes les clauses vraies~;
+  \item (Completeness) si la fonction renvoie unsat, alors toute assignation valide de littéral possible rend au moins une clause fausse~;
+  \item (Faithfullness) la fonction ne change pas le problème étudié.
+\end{enumerate}
+
+\subsection{Détails techniques}
+Pour un problème donné, nous appelons $nv$ le nombre de variables. 
+Un littéral $-i := \neg x_i$ ou $i := x_i$ est valide lorsque $0 \le i < nv$.
+Une clause $c$ valide est une disjonction de trois littéraux valides.
+Nous représentons ces propriétés par les prédicats suivants dans Why3.
+\begin{lstlisting}[language=whyml]
+type lit = int
+type cls = (lit, lit, lit)
+
+predicate is_lit (nv: int) (l: lit) =
+  -nv < l < nv
+
+predicate is_cls (nv: int) (c: cls) =
+  let l1, l2, l3 = c in
+  is_lit nv l1 /\ is_lit nv l2 /\ is_lit nv l3
+\end{lstlisting}
+
+La case $i$ du tableau $mm$ stocke l'assignation de la variable $i$. 
+L'assignation est vraie lorsque la case $i$ stocke la valeur $-i$, 
+fausse lorsqu'elle stocke la valeur $i$ et invalide dans les autres cas.
+Une clause est vraie dès lors qu'un de ses littéraux est vrai.
+Nous utilisons les prédicats suivants dans Why3:
+
+\begin{lstlisting}[language=whyml]
+type assignment = array int
+
+predicate is_assignment (mm: assignment) (na: int) =
+  0 < na <= length mm /\ mm[0] = 0 /\
+  forall i. 0 <= i < na -> abs mm[i] = i
+
+predicate ok_lit (mm: assignment) (na: int) (l: lit) =
+  is_lit (length mm) l /\ 0 <= abs l < na <= length mm /\
+  mm[abs l] <> l
+
+predicate ok_cls (mm: assignment) (na: int) (c: cls) =
+  let l1, l2, l3 = c in
+  ok_lit mm na l1 \/ ok_lit mm na l2 \/ ok_lit mm na l3
+\end{lstlisting}
+Ici, $na$ représente le numéro de la première variable non assignée.
+Nous supposons implicitement que les variables sont assignées dans l'ordre de $1$ à $nv-1$.
+
+\section{Fonctions de véracité des clauses}
+
+Dans notre implémentation, nous avons tout d'abord besoin de tester si les clauses sont satisfaites pour une assignation donnée.
+
+\subsection{Véracité des littéraux}
+
+Nous calculons la valeur de vérité d'un littéral avec la fonction suivante :
+
+\begin{lstlisting}[language=whyml]
+let is_lit_sat (mm : assignment) (nv na : int) (l : lit) : (assgnd: bool, sat : bool)
+= if abs l < na then  
+  (true, mm[abs l] <> l) 
+  else (false, false) 
+\end{lstlisting}
+
+Nous proposons le contrat suivant pour cette fonction :
+
+\begin{lstlisting}[language=whyml]
+  requires { is_assignment mm na }
+  requires { is_lit nv l }
+  ensures  { assgnd <-> abs l < na }
+  ensures  { sat <-> ok_lit mm na l }
+\end{lstlisting}
+
+Cette fonction suppose que le littéral que nous testons et l'assignation fournie sont valides.
+Notre spécification reflète les propriétés suivantes :
+\begin{enumerate}
+  \item un littéral est assigné si son indice est inférieur à celui de la première variable non assignée~;
+  \item être satisfait dans l'assignation actuelle correspond au prédicat $ok\_lit~mm~na$.
+\end{enumerate}
+
+\subsection{Véracité des clauses}
+
+Nous testons la valeur de vérité d'une clause avec la fonction :
+
+\begin{lstlisting}[language=whyml]
+let is_clause_satisfied (mm : assignment) (nv na: int) (cl : cls) : (unsat : bool, sat: bool)
+= let (l1, l2, l3) = cl in
+  let (a1, s1) = is_lit_sat mm nv na l1 in
+  let (a2, s2) = is_lit_sat mm nv na l2 in
+  let (a3, s3) = is_lit_sat mm nv na l3 in
+  let truth_value = s1 || s2 || s3 in 
+  ( a1 && a2 && a3 && not truth_value, truth_value ) 
+\end{lstlisting}
+
+Pour cette fonction, nous proposons le contrat qui suit : 
+
+\begin{lstlisting}[language=whyml]
+  requires { is_cls nv cl }
+  requires { is_assignment mm na }
+  ensures  { sat <-> ok_cls mm na cl }
+  ensures  { nv = na /\ (not unsat) -> sat }
+  ensures  { unsat -> forall mc. 
+            ((forall i. 0 <= i < na -> mc[i] = mm[i]) /\
+            is_assignment mc (mm.length)) -> not ok_cls mc (length mm) cl}
+\end{lstlisting}
+
+Ce contrat reflète que la fonction suppose que la clause et l'assignation fournies sont valides.
+Il indique également trois propriétés sur le résultat de la fonction dont nous aurons besoin :
+\begin{enumerate}
+  \item la fonction renvoi $sat$ si et seulement si la clause est valide et satisfaite~;
+  \item si toutes les variables sont assignées et que la clause n'est pas fausse, alors elle est forcément vraie~;
+  \item (Completeness sous l'assignation actuelle) si la fonction renvoie unsat, n'importe quelle extension de l'assignation actuelle ne permettra pas de rendre la clause vraie.
+\end{enumerate}
+Cette propriété est due au fait que les trois littéraux sont déjà assignés, et par conséquent, assigner d'autres variables ne change pas la valeur de vérité de la clause.
+Nous nous servons de cette propriété afin de prouver la completeness de notre fonction finale.
+
+\section{Fonction Scan}
+
+Comme mentionné dans notre description de DPLL, nous avons besoin d'une fonction de scan qui va~:
+\begin{itemize}
+  \item tester si l'assignation rend une clause fausse~;
+  \item séparer les clauses à satisfaire des clauses satisfaite.
+\end{itemize}
+
+Dans ce but, nous proposons l'implémentation suivante pour la fonction scan~:
+
+\begin{lstlisting}[language=whyml]
+let scan (mm: assignment) (cl: array cls) (nv na nc: int) : (b: bool, mc: int)
+= let ref i = 0 in
+  let ref mc = nc in
+  while i < mc do 
+    match is_clause_satisfied mm nv na cl[i] with
+    | True , _ -> 
+      return false, mc
+    | False, False ->
+      i <- i + 1
+    | False, True ->
+      mc <- mc - 1;
+      swap cl i mc
+    end
+  done;
+  true , mc 
+\end{lstlisting}
+
+% Cette fonction met dans la partie supérieure du tableau cl les clauses déja satisfaite.
+% mc contient l'indice de la première case du tableau qui contient une clause que l'on sait vraie.
+% Scan itère sur les cases du tableau inférieur à mc. Elle teste la clause courante :
+% \begin{itemize}
+%   \item Si la clause est insatisfiable, scan renvoi faux.
+%   \item Si la clause est satisfaite, scan place la clause à la fin du tableau (mc - 1), et change mc.
+%   \item Si la clause n'est ni satisfaite, ni insatisfiable, alors scan passe a la prochaine case. 
+% \end{itemize}
+% Si aucune clause insatisfiable n'est trouvée, scan renvoie vrai ainsi que la nouvelle valeur de mc.
+
+Le contrat de cette fonction est le suivant~:
+
+\begin{lstlisting}[language=whyml]
+  requires { is_assignment mm na }
+  requires { nv = mm.length }
+  requires { forall i. 0 <= i < length cl -> is_cls (length mm) cl[i] }
+  
+  requires { 0 <= nc <= cl.length }
+  requires { forall i. nc <= i < cl.length -> ok_cls mm na cl[i] } 
+
+  ensures { permut_all (old cl) cl}
+  ensures { forall i. mc <= i < cl.length -> ok_cls mm na cl[i] }
+  ensures { forall i. nc <= i < cl.length -> cl[i] = old (cl[i]) } 
+  ensures { 0 <= mc <= nc }
+  ensures { na = nv  /\ b -> mc = 0 }
+  ensures { not b -> forall mm'. 
+            ((forall i. 0 <= i < na -> mm'[i] = mm[i]) /\
+            is_assignment mm' (mm.length)) ->
+            exists i. 0 <= i < length cl /\ not ok_cls mm' (length mm) cl[i]}
+\end{lstlisting}
+
+% Cette fonction suppose tout d'abord qu'on lui fourni des entrées valides.
+%
+% De plus, elle suppose qu'on lui fourni un indice nc du tableau cl, tel que toutes 
+% les cases de cl supérieures ou égales à nc contienent des clauses que l'on sait vraies.
+%
+Ce contrat nous exprime plusieurs choses :
+\begin{enumerate}
+  \item (Faithfullness) le tableau de clause est seulement permuté~;
+  \item les clauses situées après $mc$ sont satisfaites~;
+  \item la zone des clauses satisfaite au départ ($\ge nc$) est inchangée~;
+  \item le nombre de clauses satisfaites ne peut qu'augmenter~;
+  \item si toutes les variables sont assignées et que la fonction ne trouve pas de clause fausse, alors toutes les clauses sont vraies~;
+  \item (Completeness sous l'assignation actuelle) si une clause fausse est trouvée, alors étendre de l'assignation actuelle ne permet pas de rendre cette clause vraie. 
+\end{enumerate}
+
+\subsection{Invariants}
+Afin montrer que cette implémentation est correcte, nous devons ajouter les invariants (et variant) de boucles suivants~:
+
+\begin{lstlisting}[language=whyml]
+  variant { mc - i }
+  invariant { forall i. mc <= i < cl.length -> ok_cls mm na cl[i] }
+  invariant { permut_all (old cl) cl } 
+  invariant { forall i. nc <= i < cl.length -> cl[i] = old (cl[i]) } 
+  invariant { 0 <= i <= mc <= nc }
+  invariant {forall j. 0 <= j < i -> not (ok_cls mm na cl[j]) }
+  invariant {nv = na -> i = 0 }
+\end{lstlisting}
+
+Ils traduisent les propriétés suivantes~:
+\begin{enumerate}
+  \item la boucle termine~;
+  \item les clauses dont l'indice est plus grand que $mc$ sont satisfaites~;
+  \item (Faithfullness) le tableau est au plus permuté~;
+  \item la zone $\ge nc$ reste intouchée~;
+  \item la fonction n'accède qu'à des cases dont on ne sait pas encore si les clauses sont satisfaites~;
+  \item les cases de cl que la fonction passe (entre $0$ et $i$ exclu) contiennent des clauses insatisfaites 
+    (mais pas insatisfiables) sous l'assignation actuelle~;
+  \item Si toutes les variables sont assignées, il ne peut pas y avoir de clause insatisfaite qui n'est pas insatisfiable. 
+\end{enumerate}
+
+\subsubsection{Initialisation des invariants}
+Au début de la boucle, nous avons $i = 0$ et $mc = nc$.
+Les invariants sur la zone après $mc$ correspondent aux préconditions de scan.
+De plus, le tableau n'a pas été modifié, et les bornes sont directement vérifiée.
+
+\subsubsection{Préservation des invariants}
+À chaque passage dans la boucle~:
+\begin{itemize}
+  \item si la clause courante est insatisfiable, la fonction s'arrêtte.
+  \item si la clause testée n'est pas satisfaite, mais pas insatisfiable, seul $i$ est incrémenté.
+    Nous en déduisons donc :
+    \begin{itemize}
+      \item comme $i < mc$, $i+1\le mc$ et les autres bornes sont préservées~;
+      \item nous savons que les cases $\le i$ contient une clause non satisfaite. 
+        L'invariant 6 est préservé~;
+      \item si $nv=na$, aucune clause ne peut être insatisfaite sans être insatisfiable (postcondition 2 de $is\_clause\_satisfied$)~;
+      \item les autres invariants sont trivialement préservés.
+    \end{itemize}
+  \item si la clause est satisfaite, alors $mc$ est décrémentée et on échange la case $i$ avec la case $mc-1$.
+    Ainsi~: 
+    \begin{itemize}
+      \item comme $i < mc$, $i\le mc-1$ et les autres bornes sont préservées~;
+      \item la propriété de permutation est préservée~;
+      \item la clause qui se retrouve dans la case $mc-1$ est satisfaite.
+        L'invariant 1 est préservé~;
+      \item les autres invariants sont trivialement préservés.
+    \end{itemize}
+\end{itemize}
+
+\subsubsection{Déduction des postconditions}
+
+Montrons à présent que les invariants sont préservés.
+Nous pouvons déduire les postconditions grâce à nos invariants~: 
+\begin{enumerate}
+  \item invariant 2~;
+  \item invariant 1~;
+  \item invariant 3~;
+  \item invariant 4~;
+  \item Comme $na = nv$, d'après l'invariant 6, $i = 0$ après la dernière itération de la boucle. 
+    De plus, comme $b = true$, nous en concluons que la boucle s'est terminée normalement et  $mc \le i$.
+    Or $0 \le mc \le i = 0$, donc $mc = 0$.
+  \item Comme $b = false$, $is\_clause\_satisfied$ a renvoyé $(faux, \_ )$~;
+    Donc cette postcondition se déduit de la postcondition 3 de $is\_clause\_satisfied$.
+\end{enumerate}
+
+\section{Fonction DPLL}
+
+Nous proposons d'implémenter l'algorithme DPLL avec la fonction récursive suivante~:
+
+\begin{lstlisting}[language=whyml]
+let rec dpll (mm: assignment) (cl: array cls) (nv na nc: int) : (s: bool)
+= match scan mm cl nv na nc with
+  | False, _ -> false
+  | True, mc ->
+    if mc  = 0 then ( 
+      let ref i =  na in
+      while i < nv do
+        mm[i] <- -i;
+        i <- i+1;
+      done;
+      true)
+    else (
+        mm[na] <- -na;
+        if dpll mm cl nv (na + 1) mc then true
+        else ( 
+          mm[na] <- na;
+          dpll mm cl nv (na + 1) mc
+      )
+    )
+  end 
+\end{lstlisting}
+
+Le contrat de dpll est le suivant~:
+
+\begin{lstlisting}[language=whyml]
+  requires { 0 < na <= nv }
+  requires { is_assignment mm na }
+  requires { nv = mm.length }
+  requires { 0 <= nc <= cl.length } 
+  requires { forall i. 0 <= i < length cl -> is_cls (length mm) cl[i] }
+  requires { forall i. nc <= i < cl.length -> ok_cls mm na cl[i] }
+   
+  ensures { forall i. 0 <= i < na -> mm[i] = (old mm[i])}  
+  ensures { forall i. nc <= i < cl.length -> cl[i] = old (cl[i]) } 
+  ensures { permut_all (old cl) cl }
+  ensures { s -> forall i. 0 <= i < length cl -> ok_cls mm (length mm) cl[i] }
+  ensures { s -> is_assignment mm (mm.length) }
+  ensures { not s -> forall mc. 
+            ((forall i. 0 <= i < na -> mc[i] = mm[i]) /\
+            is_assignment mc (mm.length)) ->
+            exists i. 0 <= i < length cl /\ not ok_cls mc (length mm) cl[i]}
+  variant { nv - na }
+\end{lstlisting}
+
+Ce contrat reflète le fait que cette fonction attend une entrée valide et
+% De plus, notre implémentation nécessite que toutes les clauses après l'indice $nc soit satisfaite.
+nous assure plusieurs propriétés :
+\begin{enumerate}
+  \item les variables déjà assignées ne sont pas changées~;
+  \item les clauses déjà satisfaites ne sont pas touchées~;
+  \item (Faithfullness) le tableau est au plus permuté~;
+  \item (Soundness) si dpll renvoie $true$, elle fourni une assignation dans $mm$ qui satisfait toutes les clauses~;
+  \item (Completeness sous l'assignation actuelle) si $dpll$ renvoie $false$, 
+    aucune extension de l'assignation courante ne peut satisfaire toutes les clauses~;
+  \item nous avons un nombre fini d'appels récursif.
+\end{enumerate}
+
+\subsection{Invariants}
+Afin de prouver que ce code respecte notre contrat, 
+nous devons ajouter les invariants suivant dans notre boucle de complétion de l'assignation :
+
+\begin{lstlisting}[language=whyml]
+      variant {nv - i}
+      invariant { forall j. 0 <= j < length cl -> ok_cls mm i cl[j] }
+      invariant { is_assignment mm i }
+      invariant { na <= i <= nv }
+      invariant { forall j. 0 <= j < na -> mm[j] = (old mm[j]) }
+\end{lstlisting}
+
+Ils capturent le fait que la boucle termine et assigne des variables non assignées sans changer celles qui sont déjà assignées.
+De plus, l'extension de l'assignation par la boucle préserve le fait que toutes les clauses sont satisfaites.
+
+\subsubsection{Initialisation des invariants}
+À l'initialisation, i = na.
+Nous pouvons donc vérifier que les invariants sont initialement vrais~:
+\begin{enumerate}
+  \item découle directement de la postcondition 2 de $scan$ couplée au fait que $mc = 0$~;
+  \item $is\_assigment~mm~na$ est une précondition de $dpll$~;
+  \item $na \le nv$ d'après une précondition de $dpll$~;
+  \item le tableau n'a pas encore été touché.
+\end{enumerate}
+
+\subsubsection{Préservation de l'invariant}
+
+Vérifions que ces invariants sont bien préservés :
+\begin{enumerate}
+  \item les invariants 4 et 1 de l'itération précédente indiquent que les variables déjà assignées satisfont déjà toutes les clauses 
+    et ne sont pas changées~;
+  \item l'invariant 2 de l'itération précédente combiné au fait que l'on assigne
+    à la case $i$ la valeur $-i$ font que la nouvelle assignation est valide~;
+  \item par l'invariant 3, au début de la boucle $na \le i \le nv$. 
+    $i$ est incrémenté de 1 dans la boucle. Nous voulons montrer que $i+1 \le nv$.
+    Or comme nous sommes dans une itération de la boucle, nous avons $i < nv$. 
+    Donc $i+1 \le nv$~;
+  \item Par l'invariant 3 de l'itération précédente, 
+    les cases changées sont après $na$.
+\end{enumerate}
+
+\subsubsection{Déduction des postconditions}
+
+Nous établissons d'abord la correction de la branche $mc=0$.
+Après la dernière itération, $i = nv = mm.length$.
+La postcondition 1 découle de l'invariant 4, 
+la postcondition 4 de l'invariant 1, 
+et la postcondition 5 de l'invariant 2 et du fait que $i=nv$.
+
+La correction de l'autre branche est assez directe grâce aux appels récursifs à $dpll$.
+La subtilité principale réside dans la preuve de Completeness. 
+Elle est due au fait que si les deux appels récursifs à $dpll$ ont échoués, 
+cela signifie que l'on a testé toutes les valeurs possibles pour la variable d'indice $na$ 
+et que dans tous les cas, étendre l'assignation après $na$ mène directement à une clause insatisfiable.
+
+
+\section{Conclusion}
+
+Le contrat que nous avons donné à $dpll$ permet de prouver directement le contrat de $sat$. 
+Notre implémentation est donc correcte.
+
+\subsection*{Ressenti général}
+Lors de ce projet, je n'ai pas eu de très grandes difficultés. 
+Je dirais que la partie qui m'a posé le plus de problème était la preuve de Completeness.
+En particulier, trouver les bons invariants de boucle et où mettre le coeur de la propriété.
+
+
+
+\end{document}
+

@@ -29,6 +29,7 @@ predicate is_cls (nv: int) (c: cls) =
   let l1, l2, l3 = c in
   is_lit nv l1 /\ is_lit nv l2 /\ is_lit nv l3
 
+
 (* An assignment stores for every Boolean variable `i`
    its "truth value", encoded as an integer, which is
    either equal to `i` or to `-i`. In this encoding,
@@ -82,7 +83,7 @@ let is_clause_satisfied (mm : assignment) (nv na: int) (cl : cls) : (unsat : boo
   requires { is_assignment mm na }
   ensures  { sat <-> ok_cls mm na cl }
   ensures  { nv = na /\ (not unsat) -> sat }
-  ensures  { unsat -> forall mc. 
+  ensures  { unsat -> forall mc.
             ((forall i. 0 <= i < na -> mc[i] = mm[i]) /\
             is_assignment mc (mm.length)) -> not ok_cls mc (length mm) cl}
 = let (l1, l2, l3) = cl in
@@ -115,7 +116,7 @@ let scan (mm: assignment) (cl: array cls) (nv na nc: int) : (b: bool, mc: int)
     invariant { forall i. mc <= i < cl.length -> ok_cls mm na cl[i] }
     invariant { permut_all (old cl) cl } 
     invariant { forall i. nc <= i < cl.length -> cl[i] = old (cl[i]) } 
-    invariant { 0 <= i <= mc <= nc <= cl.length }
+    invariant { 0 <= i <= mc <= nc  }
     invariant {forall j. 0 <= j < i -> not (ok_cls mm na cl[j]) }
     invariant {nv = na -> i = 0 }
     match is_clause_satisfied mm nv na cl[i] with
@@ -146,7 +147,7 @@ let rec dpll (mm: assignment) (cl: array cls) (nv na nc: int) : (s: bool)
   requires { 0 <= nc <= cl.length } 
   requires { forall i. nc <= i < cl.length -> ok_cls mm na cl[i] }
    
-  ensures { forall i. 0 <= i < na -> mm[i] = (old mm[i])}  
+  ensures { forall i. 0 <= i < na -> mm[i] = (old mm[i])}
   ensures { forall i. nc <= i < cl.length -> cl[i] = old (cl[i]) } 
   ensures { permut_all (old cl) cl }
   ensures { s -> forall i. 0 <= i < length cl -> ok_cls mm (length mm) cl[i] }
